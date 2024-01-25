@@ -9,6 +9,7 @@ import secrets
 import bcrypt
 from uuid import uuid4
 import binascii
+import re
 
 app = Flask(__name__)
 CORS(app)
@@ -28,6 +29,7 @@ class User(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     first_name = db.Column(db.String(80), nullable=False)
     last_name = db.Column(db.String(80), nullable=False)
+    profile_picture = db.Column(db.String(40))
     password = db.Column(db.String(255), nullable=False)
     salt = db.Column(db.String(255), nullable=False)
     registered_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -75,12 +77,27 @@ def internal_server_error(error):
 
 @app.route('/api/ping')
 def ping():
-    return jsonify({"message": "pong"}), 500
+    return jsonify({"message": "pong"}), 200
+
+@app.route('/api/authping')
+@jwt_required()
+def auth_ping():
+    current_user = get_jwt_identity()
+    return jsonify({"message": "pong, you are nr "+str(current_user)}), 200
 
 @app.route('/api/user/availability', methods=['GET'])
 def check_availability():
     username = request.args.get('username')
-    return jsonify({"message": username}), 200
+
+    if not username:
+        return jsonify(code='20', message='Username is required'), 400
+
+    existing_user = User.query.filter_by(username=username).first()
+
+    if existing_user:
+        return jsonify(code='10', message='Username already in use'), 200
+    else:
+        return jsonify(code='0', message='Username available'), 200
 
 
 @app.route('/api/user/register', methods=['POST'])
@@ -92,15 +109,18 @@ def register():
     last_name = data.get('last_name')
     password = data.get('password')
 
-    if not email or not username or not password:
-        return jsonify(message='Email, username, and password are required'), 400
+    if not email or not username or not password or not first_name or not last_name:
+        return jsonify(code='30', message='First name, Last name, Email, username, and password are required'), 400
     
     # Validation: Check if the email and username are unique
     if User.query.filter_by(email=email).first():
-        return jsonify(message='Email already in use'), 400
+        return jsonify(code='20', message='Email already in use'), 400
     
     if User.query.filter_by(username=username).first():
-        return jsonify(message='Username already in use'), 400
+        return jsonify(code='10', message='Username already in use'), 400
+    
+    if len(password) < 8 or not any(char.islower() for char in password) or not any(char.isupper() for char in password) or not re.compile(r'[!@#$%^&*(),.?":{}|<>]').search(password):
+        return jsonify(code='40', message='Password to weak'), 400
     
     encoded_password = password.encode('utf-8')
 
@@ -123,6 +143,7 @@ def register():
         # Add the new user to the database
         db.session.add(new_user)
         db.session.commit()
+        # send activation mail
         return jsonify(message='User registered successfully'), 201
     except IntegrityError as e:
         db.session.rollback()
@@ -133,27 +154,37 @@ def register():
 @app.route('/api/user/login', methods=['POST'])
 def login():
     data = request.get_json()
-    username = data.get('username')
+    email = data.get('email')
     password = data.get('password')
 
-    user_id = 1
-    # if bcrypt.checkpw(passwd, hashed):
-    #     print("match")
-    # else:
-    #     print("does not match")
+    user = User.query.filter_by(email=email).first()
+    
+    if user:
+        hashed_password = user.password
 
-    # Your implementation to verify login credentials and issue JWT token
-    # ...
-    access_token = create_access_token(identity=user_id)
-    return jsonify(access_token=access_token)
+        if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
+            if (user.activated == True):
+                if (user.enabled == True):
+                    access_token = create_access_token(identity=user.id)
+                    return jsonify(code='0', access_token=access_token)
+                else:
+                    return jsonify(code='10', message='Account disabled'), 200
+            else:
+                return jsonify(code='20', message='Account not activated'), 200
+
+        else:
+            return jsonify(code='30', message='Invalid credentials'), 200
+    else:
+        return jsonify(code='30', message='Invalid credentials'), 200
 
 @app.route('/api/user/resetpassword', methods=['POST'])
 def password_forgot():
     data = request.get_json()
     email = data.get('email')
 
-    # Your implementation to generate a reset token and send reset link to the user's email
-    # ...
+    #tbd
+
+
 
     return jsonify(message='Password reset link sent successfully')
 
@@ -161,8 +192,8 @@ def password_forgot():
 def activate_account():
     activation_token = request.args.get('token')
 
-    # Your implementation to generate a reset token and send reset link to the user's email
-    # ...
+    #tbd
+
 
     return jsonify(message='Activated successfully')
 
@@ -173,22 +204,14 @@ def update_account():
     user_id = current_user.get('id')
 
     data = request.get_json()
-    new_email = data.get('email')
     new_first_name = data.get('first_name')
     new_last_name = data.get('last_name')
     new_username = data.get('username')
 
-    # Validation: Check if the new email is unique
-    if new_email and User.query.filter(User.id != user_id, User.email == new_email).first():
-        return jsonify(message='Email already in use'), 400
 
     try:
         user = User.query.get(user_id)
         if user:
-            # Update the email if provided and unique
-            if new_email:
-                user.email = new_email
-
             # Update the first name if provided
             if new_first_name:
                 user.first_name = new_first_name
@@ -217,12 +240,10 @@ def update_account():
 @jwt_required()
 def delete_account():
     current_user = get_jwt_identity()
-    user_id = current_user.get('id')
 
-    # Your implementation to mark the user account as deleted
-    # ...
+    #tbd
 
-    return jsonify(message='Account deleted successfully')
+    return jsonify(code='0', message='Account deleted successfully')
 
 
 
@@ -232,7 +253,6 @@ def delete_account():
 @jwt_required()
 def upload_flight():
     current_user = get_jwt_identity()
-    user_id = current_user.get('id')
 
     # Your implementation to handle file upload, extract data, and store in the database
     # ...
