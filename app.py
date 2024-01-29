@@ -457,28 +457,44 @@ def delete_profile_picture():
         return jsonify(code='30', message=f'Error removing profile picture: {str(e)}'), 500
 
 @app.route('/api/user/image', methods=['GET'])
-# @jwt_required()
+@jwt_required(optional=True)
 def get_profile_picture():
-    # current_user = get_jwt_identity()
-
+    current_user = get_jwt_identity()
+    profile_picture_filename = request.args.get('filename')
     try:
-    #     user = User.query.get(current_user)
-
-    #     if user:
-        profile_picture_filename = request.args.get('filename')
-
         if not profile_picture_filename:
-            return jsonify(code='10', message='Filename is missing in the request'), 200
-
-
-        profile_picture_path = os.path.join(raw_profile_picture_path, profile_picture_filename)
-        
-        if os.path.exists(profile_picture_path):
-            return send_from_directory(raw_profile_picture_path, profile_picture_filename)
+            if not current_user:
+                return jsonify(code='10', message='Filename is missing in the request'), 200
+            else:
+                user = User.query.get(current_user)
+                if user:
+                    if user.profile_picture:
+                        profile_picture_file = user.profile_picture
         else:
-            return jsonify(code='20', message='Requested profile picture not found'), 404
-            # else:
-            #     return jsonify(code='40', message='User not found'), 200
+            profile_picture_file = profile_picture_filename
+
+
+        # if current_user:
+        #     user = User.query.get(current_user)
+        #     if user:
+        #         if not profile_picture_filename:
+        #             if user.profile_picture:
+        #                 profile_picture_path = os.path.join(raw_profile_picture_path, user.profile_picture)
+        #             else:
+        #                 return jsonify(code='30', message='You do not have a profile picture'), 200
+        #         else:
+        #             profile_picture_path = os.path.join(raw_profile_picture_path, profile_picture_filename)
+        # else:
+        #     if not profile_picture_filename:
+        #         return jsonify(code='10', message='Filename is missing in the request'), 200
+        #     else:
+        #         profile_picture_path = os.path.join(raw_profile_picture_path, profile_picture_filename)
+
+
+        if os.path.exists(os.path.join(raw_profile_picture_path, profile_picture_file)):
+            return send_from_directory(raw_profile_picture_path, profile_picture_file)
+        else:
+            return jsonify(code='20', message='Requested profile picture not found'), 200
     except Exception as e:
         return jsonify(code='50', message=f'Error retrieving profile picture: {str(e)}'), 500
 
