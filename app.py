@@ -64,14 +64,19 @@ class Flight(db.Model):
 
 
 
+def checkPasswordStrenght(password):
+    if len(password) < 8 or not any(char.islower() for char in password) or not any(char.isupper() for char in password) or not re.compile(r'[!@#$%^&*(),.?":{}|<>]').search(password):
+        return False
+    return True
+
 
 @jwt.expired_token_loader
 def my_expired_token_callback(jwt_header, jwt_payload):
     return jsonify(code="99", message="Token expired"), 200
 
-# @app.errorhandler(Exception)
-# def generic_error(error):
-#     return jsonify({"message": "An unexpected error occurred"}), 500
+@app.errorhandler(Exception)
+def generic_error(error):
+    return jsonify({"message": "An unexpected error occurred"}), 400
 
 
 @app.route('/api/ping')
@@ -125,7 +130,7 @@ def register():
     if User.query.filter_by(username=username).first():
         return jsonify(code='10', message='Username already in use'), 200
     
-    if len(password) < 8 or not any(char.islower() for char in password) or not any(char.isupper() for char in password) or not re.compile(r'[!@#$%^&*(),.?":{}|<>]').search(password):
+    if not checkPasswordStrenght(password):
         return jsonify(code='40', message='Password to weak'), 200
     
     encoded_password = password.encode('utf-8')
@@ -188,27 +193,64 @@ def login():
 
 @app.route('/api/user/resetpassword', methods=['POST'])
 def password_forgot():
-    
     data = request.get_json()
-    
+
     email = data.get('email')
+    resetemail = data.get('resetemail')
     token = data.get('token')
     password = data.get('password')
 
     if email:
         # tbd send email with token
-        return jsonify(code="0", message='Password reset link sent successfully'), 200
-    
-    if token:
-        if password:
-            # tbd validate token and reset reset password
+        reset_token = binascii.hexlify(os.urandom(16)).decode()
+        user = User.query.filter_by(email=email).first()
+        if user:
+            user.reset_token = reset_token
+            user.reset_token_time = datetime.utcnow()
+            db.session.commit()
 
-            return jsonify(code="10", message='Password reset link sent successfully'), 200
-
-        else:
-            return jsonify(code="10", message='Password is missing'), 200
+        return jsonify(code="0", message='If there is a user with this email address, a reset link has been sent out'), 200
     else:
-        return jsonify(code="20", message='Email/Token is missing'), 200
+        if token:
+            if resetemail:
+                if password:
+                    user = User.query.filter_by(email=resetemail).first()
+                    if user:
+                        if user.reset_token == token:
+
+                            if user.reset_token_time < datetime.utcnow() - timedelta(hours=24):
+                                user.reset_token = None
+                                user.reset_token_time = None
+                                db.session.commit()
+                                return jsonify(code="70", message='Reset token expired'), 200
+
+                            if not checkPasswordStrenght(password):
+                                return jsonify(code="60", message='Password too weak'), 200
+                            
+                            new_hashed_password = bcrypt.hashpw(password.encode('utf-8'), user.salt.encode('utf-8'))
+
+
+                            user.password = new_hashed_password
+                            user.reset_token = None
+                            user.reset_token_time = None
+
+                            db.session.commit()
+
+                            return jsonify(code="0", message='Password reset successfully'), 200
+
+
+                        else:
+                            return jsonify(code="50", message='Invalid Email/Token combination'), 200
+                        
+                    else:
+                        return jsonify(code="50", message='Invalid Email/Token combination'), 200
+
+                else:
+                    return jsonify(code="30", message='Password is missing'), 200
+            else:
+                return jsonify(code="40", message='Email is missing'), 200
+        else:
+            return jsonify(code="20", message='Email/Token is missing'), 200
 
 
 
@@ -228,7 +270,7 @@ def password_change():
         if user:
             if currentPassword:
                 if newPassword:
-                    if len(newPassword) < 8 or not any(char.islower() for char in newPassword) or not any(char.isupper() for char in newPassword) or not re.compile(r'[!@#$%^&*(),.?":{}|<>]').search(newPassword):
+                    if not checkPasswordStrenght(newPassword):
                         return jsonify(code='40', message='Password to weak'), 200
                     hashed_password = user.password
                     if bcrypt.checkpw(currentPassword.encode('utf-8'), hashed_password.encode('utf-8')):
@@ -236,6 +278,7 @@ def password_change():
 
                         user.password = new_hashed_password
                         db.session.commit()
+                        # tbd sent password change confirmation mail
                         return jsonify(code='0', message='Password updated successfully'), 200
                     else:
                         return jsonify(code='50', message='Invalid credentials'), 200
