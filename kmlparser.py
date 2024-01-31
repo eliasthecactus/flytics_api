@@ -5,10 +5,11 @@ import sys
 import re
 import os
 from timezonefinder import TimezoneFinder
-import geocoder
+from math import radians, sin, cos, sqrt, atan2
 import requests
 
-google_maps_api_key = "AIzaSyC3DKDM2DYwtnMdh1chNe_kIk1tHSQV27Q"
+# google_maps_api_key = "AIzaSyC3DKDM2DYwtnMdh1chNe_kIk1tHSQV27Q"
+google_maps_api_key = "AIzaSyA4413GL0OX12jQv2gXJC88sIh0N-__4f0"
 
 meassures_per_second = 2
 
@@ -20,8 +21,8 @@ def parse_kml(file_path):
         tree = ET.parse(file_path)
         root = tree.getroot()
 
+        coordinates = []
         for elem in root.iter():
-            coordinates = []
             if 'name' in elem.tag:
                 if (re.match(r'^Track .*', elem.text)):
                     match = re.search(r"Track (.*) .*?, (.*?) (\d\d:\d\d:\d\d)", elem.text)
@@ -40,46 +41,82 @@ def parse_kml(file_path):
                         for coordinate in line.split(','):
                             templist.append(float(coordinate.strip()))
                         coordinates.append(templist)
+            # print(coordinates)
 
 
         # # add the coordinates to the return
         # data['coordinates'] = coordinates
 
-        tzfinder = TimezoneFinder() 
-        tz = tzfinder.timezone_at(lng=coordinates[0][0], lat=coordinates[0][1])
-        data['timezone'] = tz
+        # tzfinder = TimezoneFinder() 
+        # tz = tzfinder.timezone_at(lng=coordinates[0][0], lat=coordinates[0][1])
+        # data['timezone'] = tz
+                        
+
+
+        lat1 = 46.7225024
+        lon1 = 8.1969395
+        lat2 = 46.7272347
+        lon2 = 8.1844957
+
+        R = 6371000.0
+        lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
+        c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        distance = R * c
 
 
 
 
+
+
+
+
+        endpoint = "https://maps.googleapis.com/maps/api/timezone/json"
+        params = {
+            'location': f'{str(coordinates[0][0])},{str(coordinates[0][1])}',
+            'key': google_maps_api_key,
+            'timestamp': '1679940199'
+        }
+        print(params)
+        response = requests.get(endpoint, params=params)
+        print(response.text)
+
+
+
+        country = None
+        location = None
+        location_types = ["sublocality", "locality", "administrative_area_level_3", "administrative_area_level_2","administrative_area_level_1", None]
+        current_location_type = None
         endpoint = "https://maps.googleapis.com/maps/api/geocode/json"
         params = {
             # 'latlng': f'{latitude},{longitude}',
-            'latlng': '70.978620,88.041456',
+            'latlng': str(coordinates[0][0])+","+str(coordinates[0][1]),
             'key': google_maps_api_key,
         }
         response = requests.get(endpoint, params=params)
+        # print(response.text)
         if response.status_code == 200:
             googleData = response.json()
             for result in googleData['results']:
                 for address_components in result['address_components']:
-                    print(address_components['short_name'])
+                    if not country and address_components['types'][0] == "country":
+                        country = address_components['long_name']
+                    # if address_components['types'][0] in location_types:
+                    if set(address_components['types']) & set(location_types):
+                        matching_type = next(iter(set(address_components['types']) & set(location_types)))
+                        if location_types.index(matching_type) < location_types.index(current_location_type):
+                            # print(address_components['types'][0])
+                            current_location_type = matching_type
+                            location = address_components['long_name']
         else:
             return {'code':10, 'message':'There was an error while fetching the results from the google API'}
+        
+        data['country'] = country
+        data['location'] = location
 
-        # # g = geocoder.google([coordinates[0][0], coordinates[0][1]], method='reverse', key=google_maps_api_key)
-        # g = geocoder.google([2.7549691, -71.6716367], method='reverse', key=google_maps_api_key)
 
-        # print(str(g.address))
-
-        # # force get country
-        # print(str(g[(len(g)-1)]).strip("[]"))
-        # for result in g:
-        #     print(result)
-
-        # data['city'] = g.city
-        # data['country'] = g.country
-        # data['state'] = g.state
 
 
 
