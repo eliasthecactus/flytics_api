@@ -101,7 +101,7 @@ def parse_kml(file_path):
             googleData = response.json()
             for result in googleData['results']:
                 for address_components in result['address_components']:
-                    if not country and address_components['types'][0] == "country":
+                    if not country and "country" in address_components['types']:
                         country = address_components['long_name']
                     # if address_components['types'][0] in location_types:
                     if set(address_components['types']) & set(location_types):
