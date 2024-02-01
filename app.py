@@ -18,7 +18,8 @@ from kmlparser import *
 app = Flask(__name__)
 CORS(app)
 
-raw_profile_picture_path = 'profile_pictures'
+script_path = os.path.dirname(os.path.realpath(__file__))
+raw_profile_picture_path = os.path.join(script_path, "profile_pictures")
 
 # Configure database
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://user:password@127.0.0.1:3306/db'
@@ -426,8 +427,12 @@ def change_profile_picture():
             
 
             image_type = str(imghdr.what(file))
-            filename = secrets.token_hex(16) + '.' + image_type.lower()
-            file_path = os.path.join(raw_profile_picture_path, filename)
+            while True:
+                filename = secrets.token_hex(16) + '.' + image_type.lower()
+                file_path = os.path.join(raw_profile_picture_path, filename)
+
+                if not os.path.exists(file_path):
+                    break
 
 
 
