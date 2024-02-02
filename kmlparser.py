@@ -12,8 +12,8 @@ import binascii
 
 # https://www.fai.org/sites/default/files/igc_fr_specification_2020-11-25_with_al6.pdf
 
-# google_maps_api_key = "AIzaSyC3DKDM2DYwtnMdh1chNe_kIk1tHSQV27Q"
-google_maps_api_key = "AIzaSyA4413GL0OX12jQv2gXJC88sIh0N-__4f0"
+google_maps_api_key = "AIzaSyC3DKDM2DYwtnMdh1chNe_kIk1tHSQV27Q"
+# google_maps_api_key = "AIzaSyA4413GL0OX12jQv2gXJC88sIh0N-__4f0"
 
 meassures_per_second = 2
 
@@ -114,7 +114,7 @@ def get_location(lat, long):
     
     country = None
     location = None
-    location_types = ["sublocality", "locality", "administrative_area_level_3", "administrative_area_level_2","administrative_area_level_1", None]
+    location_types = ["establishment", "sublocality", "locality", "administrative_area_level_3", "administrative_area_level_2","administrative_area_level_1", None]
     current_location_type = None
     endpoint = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {
@@ -123,7 +123,7 @@ def get_location(lat, long):
         'key': google_maps_api_key,
     }
     response = requests.get(endpoint, params=params)
-    # print(response.text)
+    # print(response.json())
     if response.status_code == 200:
         googleData = response.json()
         for result in googleData['results']:
@@ -216,6 +216,7 @@ def parse_igc(filepath, pilot):
             distance += calculate_distance(coordinates_list[i][1], coordinates_list[i][2], coordinates_list[i+1][1], coordinates_list[i+1][2])
         # data['distance'] = float("{:.6f}".format(distance))
         data['distance'] = int(distance)
+        data['distance_air'] = int(calculate_distance(coordinates_list[0][1], coordinates_list[0][2], coordinates_list[len(coordinates_list) - 1][1], coordinates_list[len(coordinates_list) - 1][2]))
         
         data['start_height'] = coordinates_list[0][3]
         data['start_lat'] = coordinates_list[0][1]

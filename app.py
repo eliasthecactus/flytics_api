@@ -13,6 +13,7 @@ import re
 import imghdr
 from PIL import Image
 from kmlparser import *
+import hashlib
 
 
 app = Flask(__name__)
@@ -20,6 +21,7 @@ CORS(app)
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 raw_profile_picture_path = os.path.join(script_path, "profile_pictures")
+raw_igc_files_path = os.path.join(script_path, "igc_files")
 
 # Configure database
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://user:password@127.0.0.1:3306/db'
@@ -53,14 +55,25 @@ class User(db.Model):
 class Flight(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    date = db.Column(db.Date)
-    time = db.Column(db.Time)
+    # timestamp = db.Column(db.Integer)
+    start_time = db.Column(db.DateTime)
     timezone = db.Column(db.String(60))
-    coordinates = db.Column(db.Integer)
-    public = db.Column(db.Boolean, default=True)
-    original_filename = db.Column(db.String(255))
-    filename = db.Column(db.String(20))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    country = db.Column(db.String(60))
+    country_code = db.Column(db.String(10))
+    location = db.Column(db.String(60))
+    distance = db.Column(db.Integer)
+    start_lat = db.Column(db.Float)
+    start_long = db.Column(db.Float)
+    start_height = db.Column(db.Integer)
+    end_height = db.Column(db.Integer)
+    duration = db.Column(db.Integer)
+    timezone_raw_offset = db.Column(db.Integer)
+    timezone_dst_offset = db.Column(db.Integer)
+    public = db.Column(db.Boolean)
+    igc_file = db.Column(db.String(50))
+    igc_sum=db.Column(db.String(32))
+    kml_file = db.Column(db.String(50))
+    uploaded = db.Column(db.DateTime, default=datetime.utcnow)
     info = db.Column(db.String(255))
 
 
@@ -77,6 +90,7 @@ def my_expired_token_callback(jwt_header, jwt_payload):
 
 @app.errorhandler(Exception)
 def generic_error(error):
+    print(error)
     return jsonify({"message": "An unexpected error occurred"}), 400
 
 
@@ -554,46 +568,200 @@ def get_profile_picture():
 @jwt_required()
 def upload_flight():
     current_user = get_jwt_identity()
+    try:
+        user = User.query.get(current_user)
+        if user:
+            if 'file' not in request.files:
+                return jsonify(code='10', message='No file part'), 200
+            
+            file = request.files['file']
 
-    # Your implementation to handle file upload, extract data, and store in the database
-    # ...
+            if file.filename == '':
+                return jsonify(code='20', message='No selected file'), 200
+            
+            max_file_size = 0.1 * 1024 * 1024
+            if file.content_length > max_file_size:
+                return jsonify(code='70', message='File size exceeds the limit of 5 MB'), 200
+            
 
-    # tbd multiple files (folder recursive)
 
-    return jsonify(message='Flight uploaded successfully')
+            if request.form.get('private'):
+                flight_private_str = request.form.get('private')
+                flight_private = flight_private_str.lower() == 'true'
+            else:
+                flight_private = False
+                
+                
+            
+            flight_information = request.form.get('information')
+
+            
+
+            os.makedirs(raw_igc_files_path, exist_ok=True)
+
+
+            while True:
+                filename = secrets.token_hex(16) + '.' + "igc"
+                file_path = os.path.join(raw_igc_files_path, filename)
+
+                if not os.path.exists(file_path):
+                    break
+
+
+
+            file.save(file_path)
+
+            md5_hash = hashlib.md5()
+            with open(file_path, "rb") as f:
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    md5_hash.update(byte_block)
+            md5_value = md5_hash.hexdigest()
+            # print(md5_value)
+
+
+            existing_flight = Flight.query.filter_by(user_id=user.id, igc_sum=md5_value).first()
+            if existing_flight:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                return jsonify(code='60', message='Duplicate flight. The same flight is already available.'), 200
+            
+
+            current_flight_data = parse_igc(file_path, str(user.first_name) + " " + str(user.last_name))
+            if (current_flight_data['code'] != 0):
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                return jsonify(code='80', message=current_flight_data['message']), 200
+
+
+            utc_datetime = datetime.utcfromtimestamp(current_flight_data['timestamp'])
+
+            if current_flight_data['code'] == 0:
+                new_flight = Flight(
+                    user_id=user.id,
+                    timezone=current_flight_data['timezone_id'],
+                    # timestamp=current_flight_data['timestamp'],
+                    start_time=utc_datetime,
+                    country=current_flight_data['country'],
+                    country_code=current_flight_data['country_code'],
+                    location=current_flight_data['location'],
+                    distance=current_flight_data['distance'],
+                    start_lat=current_flight_data['start_lat'],
+                    start_long=current_flight_data['start_long'],
+                    start_height=current_flight_data['start_height'],
+                    end_height=current_flight_data['end_height'],
+                    duration=current_flight_data['duration'],
+                    timezone_raw_offset=current_flight_data['timezone_raw_offset'],
+                    timezone_dst_offset=current_flight_data['timezone_dst_offset'],
+                    public=not flight_private,
+                    igc_file=filename,
+                    igc_sum=md5_value,
+                    kml_file=current_flight_data['kml_file'],
+                    info=flight_information
+                )
+
+                db.session.add(new_flight)
+                db.session.commit()
+                return jsonify(code='0', message='Flight imported successfully'), 200
+            else:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                return jsonify(code='30', message=current_flight_data['message']), 200
+                
+        else:
+            return jsonify(code='40', message='User not found'), 200
+    except Exception as e:
+        # tbd del gen kml files if fail
+        if os.path.exists(os.path.join(script_path + "/kml_files/" + current_flight_data['kml_file'])):
+            os.remove(os.path.join(script_path + "/kml_files/" + current_flight_data['kml_file']))
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        db.session.rollback()
+        return jsonify(code='50', message=f'There was an error while uploading the flight: {str(e)}'), 500
+
 
 @app.route('/api/flights/<int:flight_id>', methods=['DELETE'])
 @jwt_required()
 def delete_flight(flight_id):
     current_user = get_jwt_identity()
-    user_id = current_user.get('id')
+    
+    try:
+        user = User.query.get(current_user)
+        
+        if not user:
+            return jsonify(code='20', message=f'User not found')
+        
+        flight = Flight.query.filter_by(id=flight_id, user_id=user.id).first()
+        if not flight:
+            return jsonify(code='30', message=f'Flight {flight_id} not found or does not belong to the user'), 200
+        
+        if os.path.exists(os.path.join(script_path + "/kml_files/" + flight.kml_file)):
+            os.remove(os.path.join(script_path + "/kml_files/" + flight.kml_file))
+        if os.path.exists(os.path.join(script_path + "/igc_files/" + flight.igc_file)):
+            os.remove(os.path.join(script_path + "/igc_files/" + flight.igc_file))
 
-    # Your implementation to check ownership and delete the specified flight entry
-    # ...
+        db.session.delete(flight)
+        db.session.commit()
 
-    return jsonify(message=f'Flight {flight_id} deleted successfully')
+        return jsonify(code='0', message=f'Flight {flight_id} deleted successfully'), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(code='50', message=f'Error deleting flight: {str(e)}'), 500
+
 
 @app.route('/api/flights/<int:flight_id>', methods=['GET'])
 @jwt_required()
+def get_flight_details(flight_id):
+    current_user = get_jwt_identity()
+
+    # tbd get flight details
+
+    return jsonify(message=f'Flight {flight_id} deleted successfully')
+
+
+@app.route('/api/flights', methods=['GET'])
+@jwt_required()
 def get_flight(flight_id):
     current_user = get_jwt_identity()
-    user_id = current_user.get('id')
+    
+    filetype = request.args.get('type')
+    
+    if not filetype:
+        return jsonify(code=10, message=f'Please select the filetype (kml or igc) as a parameter')
 
-    # Your implementation to check ownership and provide download link for the specified flight
-    # ...
+    user = User.query.get(current_user)
+    
+    if not user:
+        return jsonify(code=20, message=f'User not found')
+        
+    # tbd get flights within filter
 
-    return jsonify(message=f'Download Flight {flight_id} endpoint')
+
+    return jsonify(code=0, message=f'Download Flight {flight_id} endpoint')
+
 
 @app.route('/api/flights/<int:flight_id>/download', methods=['GET'])
 @jwt_required()
 def download_flight(flight_id):
     current_user = get_jwt_identity()
-    user_id = current_user.get('id')
+    
+    filetype = request.args.get('type')
+    
+    if not filetype:
+        return jsonify(code=10, message=f'Please select the filetype (kml or igc) as a parameter')
+
+    user = User.query.get(current_user)
+    
+    if not user:
+        return jsonify(code=20, message=f'User not found')
+    
+    
+    # kml or igc
 
     # Your implementation to check ownership and provide download link for the specified flight
     # ...
 
-    return jsonify(message=f'Download Flight {flight_id} endpoint')
+    return jsonify(code=0, message=f'Download Flight {flight_id} endpoint')
 
 
 if __name__ == '__main__':
