@@ -562,7 +562,9 @@ def get_profile_picture():
 
 
 
-# Routes for Flight Data Management
+
+
+
 
 @app.route('/api/flights', methods=['POST'])
 @jwt_required()
@@ -734,7 +736,7 @@ def get_flight(flight_id):
     if not user:
         return jsonify(code=20, message=f'User not found')
         
-    # tbd get flights within filter
+    # tbd get flights within filter and return id
 
 
     return jsonify(code=0, message=f'Download Flight {flight_id} endpoint')
@@ -749,19 +751,36 @@ def download_flight(flight_id):
     
     if not filetype:
         return jsonify(code=10, message=f'Please select the filetype (kml or igc) as a parameter')
+        
 
     user = User.query.get(current_user)
     
     if not user:
-        return jsonify(code=20, message=f'User not found')
+        return jsonify(code=30, message=f'User not found')
     
     
-    # kml or igc
+    flight = Flight.query.filter_by(id=flight_id, user_id=user.id).first()
+    if not flight:
+        return jsonify(code=40, message=f'Flight {flight_id} not found or does not belong to the user'), 200
+    
+    if filetype == "kml":
+        requested_file_path = os.path.join(script_path + "/kml_files/")
+        requested_filename = flight.kml_file
+    elif filetype == "igc":
+        requested_file_path = os.path.join(script_path + "/igc_files/")
+        requested_filename = flight.igc_file
+    else:
+        return jsonify(code=50, message=f'Wrong type for download')
+    
+    if not os.path.exists(os.path.join(requested_file_path, requested_filename)):
+        return jsonify(code=60, message=f'File not available')
+    
+    print("check")
+    print(requested_file_path)
+    print(requested_filename)
 
-    # Your implementation to check ownership and provide download link for the specified flight
-    # ...
-
-    return jsonify(code=0, message=f'Download Flight {flight_id} endpoint')
+        
+    return send_from_directory(requested_file_path, requested_filename)
 
 
 if __name__ == '__main__':
