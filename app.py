@@ -2,7 +2,7 @@ from MySQLdb import IntegrityError
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, create_refresh_token
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, create_refresh_token, get_jwt
 from datetime import datetime, timedelta
 import os
 import secrets
@@ -14,6 +14,8 @@ import imghdr
 from PIL import Image
 from kmlparser import *
 import hashlib
+from sqlalchemy import func, or_
+
 
 
 app = Flask(__name__)
@@ -27,6 +29,8 @@ raw_igc_files_path = os.path.join(script_path, "igc_files")
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://user:password@127.0.0.1:3306/db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'default_secret_key')
+app.config['JWT_BLACKLIST_ENABLED'] = True
+app.config['JWT_BLACKLIST_TOKEN_CHECKS'] = ['access', 'refresh']
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
@@ -75,6 +79,13 @@ class Flight(db.Model):
     kml_file = db.Column(db.String(50))
     uploaded = db.Column(db.DateTime, default=datetime.utcnow)
     info = db.Column(db.String(255))
+    
+class TokenBlocklist(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    jti = db.Column(db.String(36), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, nullable=False)
+    
+
 
 
 
@@ -82,6 +93,14 @@ def checkPasswordStrenght(password):
     if len(password) < 8 or not any(char.islower() for char in password) or not any(char.isupper() for char in password) or not re.compile(r'[!@#$%^&*(),.?":{}|<>]').search(password):
         return False
     return True
+
+
+@jwt.token_in_blocklist_loader
+def check_if_token_revoked(jwt_header, jwt_payload: dict) -> bool:
+    jti = jwt_payload["jti"]
+    token = db.session.query(TokenBlocklist.id).filter_by(jti=jti).scalar()
+
+    return token is not None
 
 
 @jwt.expired_token_loader
@@ -104,12 +123,14 @@ def auth_ping():
     current_user = get_jwt_identity()
     return jsonify(code='0', message='pong'), 200
 
-@app.route('/api/user/refresh', methods=['GET'])
-@jwt_required()
-def refresh_token():
-    current_user = get_jwt_identity()
-    new_access_token = create_access_token(identity=current_user)
-    return jsonify(code="0", access_token=new_access_token), 200
+# @app.route('/api/user/refresh', methods=['GET'])
+# @jwt_required()
+# def refresh_token():
+#     current_user = get_jwt_identity()
+#     new_access_token = create_access_token(identity=current_user)
+#     return jsonify(code="0", access_token=new_access_token), 200
+
+
 
 
 @app.route('/api/user/availability', methods=['GET'])
@@ -204,6 +225,16 @@ def login():
             return jsonify(code='30', message='Invalid credentials'), 200
     else:
         return jsonify(code='30', message='Invalid credentials'), 200
+
+
+@app.route("/api/user/logout", methods=["DELETE"])
+@jwt_required()
+def logout():
+    jti = get_jwt()["jti"]
+    now = datetime.now(timezone.utc)
+    db.session.add(TokenBlocklist(jti=jti, created_at=now))
+    db.session.commit()
+    return jsonify(code=0, message="JWT revoked")
 
 
 @app.route('/api/user/resetpassword', methods=['POST'])
@@ -711,35 +742,173 @@ def delete_flight(flight_id):
         return jsonify(code='50', message=f'Error deleting flight: {str(e)}'), 500
 
 
-@app.route('/api/flights/<int:flight_id>', methods=['GET'])
-@jwt_required()
-def get_flight_details(flight_id):
-    current_user = get_jwt_identity()
+# @app.route('/api/flights/<int:flight_id>', methods=['GET'])
+# @jwt_required()
+# def get_flight_details(flight_id):
+#     current_user = get_jwt_identity()
 
-    # tbd get flight details
+#     user = User.query.get(current_user)
 
-    return jsonify(message=f'Flight {flight_id} deleted successfully')
+#     if not user:
+#         return jsonify(code='20', message='User not found'), 404
+
+#     # flight = Flight.query.filter_by(id=flight_id, user_id=user.id).first()
+#     flight = Flight.query.filter((Flight.id == flight_id) & ((Flight.user_id == user.id) | (Flight.public == True))).first()
+
+#     if not flight:
+#         return jsonify(code='30', message=f'Flight {flight_id} not found or not accessible'), 404
+
+#     # Convert datetime objects to string for JSON serialization
+#     flight_details = {
+#         'id': flight.id,
+#         'user_id': flight.user_id,
+#         'start_time': str(flight.start_time),
+#         'timezone': flight.timezone,
+#         'country': flight.country,
+#         'country_code': flight.country_code,
+#         'location': flight.location,
+#         'distance': flight.distance,
+#         'start_lat': flight.start_lat,
+#         'start_long': flight.start_long,
+#         'start_height': flight.start_height,
+#         'end_height': flight.end_height,
+#         'duration': flight.duration,
+#         'timezone_raw_offset': flight.timezone_raw_offset,
+#         'timezone_dst_offset': flight.timezone_dst_offset,
+#         'public': flight.public,
+#         # 'igc_file': flight.igc_file,
+#         'igc_sum': flight.igc_sum,
+#         # 'kml_file': flight.kml_file,
+#         'uploaded': str(flight.uploaded),
+#         'info': flight.info
+#     }
+#     return jsonify(code='0', flight=flight_details), 200
+
 
 
 @app.route('/api/flights', methods=['GET'])
 @jwt_required()
-def get_flight(flight_id):
+def get_flights():
     current_user = get_jwt_identity()
     
-    filetype = request.args.get('type')
-    
-    if not filetype:
-        return jsonify(code=10, message=f'Please select the filetype (kml or igc) as a parameter')
-
     user = User.query.get(current_user)
     
     if not user:
-        return jsonify(code=20, message=f'User not found')
+        return jsonify(code='20', message='User not found'), 200
+    
+    try:
+        user_id_str = request.args.get('user')
+        flight_id_str = request.args.get('flight_id')
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+        location_lat = request.args.get('location_lat')
+        location_long = request.args.get('location_long')
+        location_range_min = request.args.get('location_range_min')
+        location_range_max = request.args.get('location_range_max')
+        start_height_min = request.args.get('start_height_min')
+        start_height_max = request.args.get('start_height_max')
+        end_height_min = request.args.get('end_height_min')
+        end_height_max = request.args.get('end_height_max')
+        distance_min = request.args.get('distance_min')
+        distance_max = request.args.get('distance_max')
+        duration_min = request.args.get('duration_min')
+        duration_max = request.args.get('duration_max')
         
-    # tbd get flights within filter and return id
+        
+        # Base query for the user's flights
+        base_query = Flight.query
+        
+        
+        flight_user = User.query.get(user_id_str)
+        if flight_user:
+            if user == flight_user:
+                base_query = base_query.filter(Flight.user_id == user.id)
+            else:
+                base_query = base_query.filter(Flight.user_id == flight_user.id, Flight.public == True)
+        else:
+            base_query = base_query.filter(or_(Flight.user_id == current_user.id, Flight.public == True))
+
+        # Additional condition for flight_id_str
+        if flight_id_str:
+            base_query = base_query.filter(Flight.id == flight_id_str)
 
 
-    return jsonify(code=0, message=f'Download Flight {flight_id} endpoint')
+        
+        # Parse date parameters
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d') if start_date_str else None
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d') if end_date_str else None
+        
+        # Apply date range filter
+        if start_date:
+            base_query = base_query.filter(Flight.start_time >= start_date)
+        if end_date:
+            base_query = base_query.filter(Flight.start_time <= end_date)
+
+        # Apply start_height range filter
+        if start_height_min:
+            base_query = base_query.filter(Flight.start_height >= int(start_height_min))
+        if start_height_max:
+            base_query = base_query.filter(Flight.start_height <= int(start_height_max))
+            
+        # Apply start_height range filter
+        if end_height_min:
+            base_query = base_query.filter(Flight.end_height >= int(end_height_min))
+        if end_height_max:
+            base_query = base_query.filter(Flight.end_height <= int(end_height_max))
+
+        # Apply distance range filter
+        if distance_min:
+            base_query = base_query.filter(Flight.distance >= int(distance_min))
+        if distance_max:
+            base_query = base_query.filter(Flight.distance <= int(distance_max))
+
+        # Apply duration range filter
+        if duration_min:
+            base_query = base_query.filter(Flight.duration >= int(duration_min))
+        if duration_max:
+            base_query = base_query.filter(Flight.duration <= int(duration_max))
+        
+
+        # Execute the final query
+        filtered_flights = base_query.all()
+        
+        if location_lat and location_long:
+            if location_range_min or location_range_max:
+                filtered_flights = [
+            flight for flight in filtered_flights if (location_range_min is None or calculate_distance(float(location_lat), float(location_long), float(flight.start_lat), float(flight.start_long)) >= float(location_range_min)) and (location_range_max is None or calculate_distance(float(location_lat), float(location_long), float(flight.start_lat), float(flight.start_long)) <= float(location_range_max))
+        ]
+                    
+        
+
+        # Prepare response data
+        flightList = [{
+            'id': flight.id,
+            'user': flight.user_id,
+            'start_time': str(flight.start_time),
+            'timezone': flight.timezone,
+            'country': flight.country,
+            'country_code': flight.country_code,
+            'location': flight.location,
+            'distance': flight.distance,
+            'start_lat': flight.start_lat,
+            'start_long': flight.start_long,
+            'start_height': flight.start_height,
+            'end_height': flight.end_height,
+            'duration': flight.duration,
+            'timezone_raw_offset': flight.timezone_raw_offset,
+            'timezone_dst_offset': flight.timezone_dst_offset,
+            'public': flight.public,
+            # 'igc_file': flight.igc_file,
+            'igc_sum': flight.igc_sum,
+            # 'kml_file': flight.kml_file,
+            'uploaded': str(flight.uploaded),
+            'info': flight.info
+        } for flight in filtered_flights]
+
+        return jsonify(code='0', message=f'{len(flightList)} flights found', count=len(flightList), flights=flightList), 200
+
+    except Exception as e:
+        return jsonify(code='50', message=f'Error retrieving flights: {str(e)}'), 500
 
 
 @app.route('/api/flights/<int:flight_id>/download', methods=['GET'])
@@ -775,12 +944,10 @@ def download_flight(flight_id):
     if not os.path.exists(os.path.join(requested_file_path, requested_filename)):
         return jsonify(code=60, message=f'File not available')
     
-    print("check")
-    print(requested_file_path)
-    print(requested_filename)
 
-        
-    return send_from_directory(requested_file_path, requested_filename)
+    generic_filename = f'flight_{flight_id}.{filetype}'
+    
+    return send_from_directory(requested_file_path, requested_filename, as_attachment=True, download_name=generic_filename)
 
 
 if __name__ == '__main__':
