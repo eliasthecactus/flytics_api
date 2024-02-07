@@ -817,16 +817,19 @@ def get_flights():
         
         # Base query for the user's flights
         base_query = Flight.query
+
         
-        
-        flight_user = User.query.get(user_id_str)
-        if flight_user:
-            if user == flight_user:
-                base_query = base_query.filter(Flight.user_id == user.id)
+        if user_id_str:
+            flight_user = User.query.get(user_id_str)
+            if flight_user:
+                if user == flight_user:
+                    base_query = base_query.filter(Flight.user_id == user.id)
+                else:
+                    base_query = base_query.filter(Flight.user_id == flight_user.id, Flight.public == True)
             else:
-                base_query = base_query.filter(Flight.user_id == flight_user.id, Flight.public == True)
+                return jsonify(code='30', message="User does not exist"), 200
         else:
-            base_query = base_query.filter(or_(Flight.user_id == current_user.id, Flight.public == True))
+            base_query = base_query.filter(or_(Flight.user_id == current_user, Flight.public == True))
 
         # Additional condition for flight_id_str
         if flight_id_str:
