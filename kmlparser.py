@@ -12,8 +12,7 @@ import binascii
 
 # https://www.fai.org/sites/default/files/igc_fr_specification_2020-11-25_with_al6.pdf
 
-google_maps_api_key = "AIzaSyC3DKDM2DYwtnMdh1chNe_kIk1tHSQV27Q"
-# google_maps_api_key = "AIzaSyA4413GL0OX12jQv2gXJC88sIh0N-__4f0"
+google_maps_api_key = "AIzaSyA4413GL0OX12jQv2gXJC88sIh0N-__4f0"
 
 meassures_per_second = 2
 
@@ -235,84 +234,84 @@ def parse_igc(filepath, pilot):
 
 
 
-def parse_kml(file_path):
-        # try:
-            data = {}
+# def parse_kml(file_path):
+#         # try:
+#             data = {}
 
-            tree = ET.parse(file_path)
-            root = tree.getroot()
+#             tree = ET.parse(file_path)
+#             root = tree.getroot()
 
-            coordinates = []
-            for elem in root.iter():
-                if 'name' in elem.tag:
-                    if (re.match(r'^Track .*', elem.text)):
-                        match = re.search(r"Track (.*) .*?, (.*?) (\d\d:\d\d:\d\d)", elem.text)
-                        flightUser = match.group(1)
-                        flightDate = dateparser.parse(match.group(2)).date()
-                        flightTime = dateparser.parse(match.group(3)).time()
+#             coordinates = []
+#             for elem in root.iter():
+#                 if 'name' in elem.tag:
+#                     if (re.match(r'^Track .*', elem.text)):
+#                         match = re.search(r"Track (.*) .*?, (.*?) (\d\d:\d\d:\d\d)", elem.text)
+#                         flightUser = match.group(1)
+#                         flightDate = dateparser.parse(match.group(2)).date()
+#                         flightTime = dateparser.parse(match.group(3)).time()
                         
-                        timezone = pytz.timezone('Europe/London')                        
-                        flight_datetime = datetime.combine(flightDate, flightTime)
-                        aware_datetime = timezone.localize(flight_datetime)
-                        timestamp = int(aware_datetime.timestamp())
+#                         timezone = pytz.timezone('Europe/London')                        
+#                         flight_datetime = datetime.combine(flightDate, flightTime)
+#                         aware_datetime = timezone.localize(flight_datetime)
+#                         timestamp = int(aware_datetime.timestamp())
                         
-                        # print(timestamp)
+#                         # print(timestamp)
 
-                        data['timestamp'] = timestamp
+#                         data['timestamp'] = timestamp
                             
-                        # data['user'] = flightUser
-                        # data['date'] = str(flightDate)
-                        # data['time'] = str(flightTime)
+#                         # data['user'] = flightUser
+#                         # data['date'] = str(flightDate)
+#                         # data['time'] = str(flightTime)
 
-                if 'coordinates' in elem.tag:
-                    for line in elem.text.splitlines():
-                        templist = []
-                        if line.strip() != "":
-                            for coordinate in line.split(','):
-                                templist.append(float(coordinate.strip()))
-                            coordinates.append(templist)
-                # print(coordinates)
+#                 if 'coordinates' in elem.tag:
+#                     for line in elem.text.splitlines():
+#                         templist = []
+#                         if line.strip() != "":
+#                             for coordinate in line.split(','):
+#                                 templist.append(float(coordinate.strip()))
+#                             coordinates.append(templist)
+#                 # print(coordinates)
 
 
-            # # add the coordinates to the return
-            # data['coordinates'] = coordinates
+#             # # add the coordinates to the return
+#             # data['coordinates'] = coordinates
 
-            # tzfinder = TimezoneFinder() 
-            # tz = tzfinder.timezone_at(lng=coordinates[0][0], lat=coordinates[0][1])
-            # data['timezone'] = tz
+#             # tzfinder = TimezoneFinder() 
+#             # tz = tzfinder.timezone_at(lng=coordinates[0][0], lat=coordinates[0][1])
+#             # data['timezone'] = tz
                             
 
 
-            # distance =  calculate_distance(46.7225024, 8.1969395, 46.7272347, 8.1844957)
+#             # distance =  calculate_distance(46.7225024, 8.1969395, 46.7272347, 8.1844957)
 
 
-            lat = coordinates[0][1]
-            long = coordinates[0][0]
+#             lat = coordinates[0][1]
+#             long = coordinates[0][0]
 
 
 
-            timezone = get_timezone(lat=lat, long=long, timestamp=data['timestamp'])
-            location = get_location(lat=lat, long=long)
+#             timezone = get_timezone(lat=lat, long=long, timestamp=data['timestamp'])
+#             location = get_location(lat=lat, long=long)
             
             
             
 
-            data['timezone_id'] = timezone['timeZoneId']
-            data['timezone_raw_offset'] = timezone['rawOffset']
-            data['timezone_dst_offset'] = timezone['dstOffset']
-            data['country'] = location['country']
-            data['location'] = location['location']
+#             data['timezone_id'] = timezone['timeZoneId']
+#             data['timezone_raw_offset'] = timezone['rawOffset']
+#             data['timezone_dst_offset'] = timezone['dstOffset']
+#             data['country'] = location['country']
+#             data['location'] = location['location']
 
 
-            data['meassure_points'] = len(coordinates)
+#             data['meassure_points'] = len(coordinates)
 
-            data['code'] = 0
-            data['message'] = "Everything fine"
-            return data
+#             data['code'] = 0
+#             data['message'] = "Everything fine"
+#             return data
         
-        # except Exception as e:
-        #     print(e)
-            # return {'code':90, 'message':'There was an error while proccessing the kml files'}
+#         # except Exception as e:
+#         #     print(e)
+#             # return {'code':90, 'message':'There was an error while proccessing the kml files'}
 
 
 
