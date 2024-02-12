@@ -202,7 +202,8 @@ def parse_igc(filepath, pilot):
         
         timezone = get_timezone(lat=lat, long=long, timestamp=data['timestamp'])
         location = get_location(lat=lat, long=long)
-            
+
+
         data['timezone_id'] = timezone['timeZoneId']
         data['timezone_raw_offset'] = timezone['rawOffset']
         data['timezone_dst_offset'] = timezone['dstOffset']

@@ -18,6 +18,7 @@ from sqlalchemy import func, or_
 
 
 
+
 app = Flask(__name__)
 CORS(app)
 
@@ -85,6 +86,14 @@ class TokenBlocklist(db.Model):
     jti = db.Column(db.String(36), nullable=False, index=True)
     created_at = db.Column(db.DateTime, nullable=False)
     
+class LocationStorage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    lat = db.Column(db.Float)
+    long = db.Column(db.Float)
+    location = db.Column(db.String(60))
+    country = db.Column(db.String(60))
+    country_code = db.Column(db.String(10))
+    
 
 
 
@@ -121,7 +130,41 @@ def ping():
 @jwt_required()
 def auth_ping():
     current_user = get_jwt_identity()
-    return jsonify(code='0', message='pong'), 200
+    return jsonify(code='0', message='pong', user=current_user), 200
+
+
+# # not implemented yet
+# @app.route('/api/getlocation', methods=['GET'])
+# @jwt_required()
+# def get_location_string():
+#     current_user = get_jwt_identity()
+#     # Check if the location is already in the database
+#     base_query = LocationStorage.query
+#     tolerance = 0.04
+#     base_query = base_query.filter(LocationStorage.lat.between(lat - tolerance, lat + tolerance), LocationStorage.long.between(long - tolerance, long + tolerance))
+#     if base_query.count() > 0:
+#         print("There is an available location")
+#         result = base_query.first()
+#         return {'country': result.country, 'country_code': result.country_code, 'location': result.location}
+#     else:
+#         print("Location not found in the database")
+    
+#     try:
+#         lat = float(request.args.get('lat'))
+#         long = float(request.args.get('long'))
+#     except:
+#         return jsonify(code='30', message='Invalid parameter format'), 200
+#     if not long or not lat:
+#         return jsonify(code='20', message='Invalid parameters'), 200
+
+#     location = get_location(lat=lat, long=long)
+#     if location['location'] is None:
+#         return jsonify(code='10', message='No valid location found'), 200
+    
+#     return jsonify(code='0', message=location['location']), 200
+
+
+    
 
 # @app.route('/api/user/refresh', methods=['GET'])
 # @jwt_required()
