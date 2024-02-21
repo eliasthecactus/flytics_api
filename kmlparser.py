@@ -9,6 +9,7 @@ from math import radians, sin, cos, sqrt, atan2
 import requests
 import pytz
 import binascii
+import geojson
 
 # https://www.fai.org/sites/default/files/igc_fr_specification_2020-11-25_with_al6.pdf
 
@@ -85,6 +86,45 @@ def generate_kml(coordinates, timestamp, person_name):
     tree = ET.ElementTree(kml)
     tree.write(output_path)
     
+    return filename
+
+def generateGeoJSON(coordinates):
+
+    coordinates = [[lon, lat, elev] for _, lat, lon, elev in coordinates]
+    
+    # Create a LineString feature
+    line_string = geojson.LineString(coordinates)
+
+    # Create a Feature with the LineString geometry
+    feature = geojson.Feature(geometry=line_string, properties={
+        "name": "by Flytics",
+        "styleUrl": "#TrackLine",
+        "styleHash": "25bb3816",
+        "stroke": "#00ff00",
+        "stroke-opacity": 1,
+        "stroke-width": 2,
+        "visibility": "1"
+    })
+
+    # Create a FeatureCollection with the Feature
+    feature_collection = geojson.FeatureCollection([feature])
+
+    script_path = os.path.dirname(os.path.realpath(__file__))
+    output_folder = os.path.join(script_path, "geojson_files")
+    os.makedirs(output_folder, exist_ok=True)
+    
+    while True:
+        filename = binascii.hexlify(os.urandom(16)).decode() + ".geojson"
+        output_path = os.path.join(output_folder, filename)
+
+        if not os.path.exists(output_path):
+            break
+
+    output_path = os.path.join(output_folder, filename)
+
+    with open(output_path, 'w') as f:
+        geojson.dump(feature_collection, f)
+
     return filename
 
 
@@ -221,12 +261,15 @@ def parse_igc(filepath, pilot):
         data['start_height'] = coordinates_list[0][3]
         data['start_lat'] = coordinates_list[0][1]
         data['start_long'] = coordinates_list[0][2]
+
+        # tbd end coordinates
         
         data['end_height'] = coordinates_list[len(coordinates_list)-1][3]
 
         data['duration'] = coordinates_list[len(coordinates_list)-1][0] - coordinates_list[0][0]
 
-        data['kml_file'] = generate_kml(coordinates=coordinates_list, timestamp=data['timestamp'], person_name=pilot)   
+        data['kml_file'] = generate_kml(coordinates=coordinates_list, timestamp=data['timestamp'], person_name=pilot)
+        data['geojson_file'] = generateGeoJSON(coordinates=coordinates_list)
                         
         return data
 

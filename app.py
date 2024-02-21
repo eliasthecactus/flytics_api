@@ -15,12 +15,15 @@ from PIL import Image
 from kmlparser import *
 import hashlib
 from sqlalchemy import func, or_
-
+from postmarker.core import PostmarkClient
 
 
 
 app = Flask(__name__)
 CORS(app)
+
+
+postmark = PostmarkClient(server_token='4b1f4a36-cf94-40fe-8588-f773cea34972', account_token='9a32a58c-d43a-4d24-92ba-9f26aad3f179', verbosity=3)
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 raw_profile_picture_path = os.path.join(script_path, "profile_pictures")
@@ -78,6 +81,7 @@ class Flight(db.Model):
     igc_file = db.Column(db.String(50))
     igc_sum=db.Column(db.String(32))
     kml_file = db.Column(db.String(50))
+    geojson_file = db.Column(db.String(50))
     uploaded = db.Column(db.DateTime, default=datetime.utcnow)
     info = db.Column(db.String(255))
     
@@ -85,15 +89,7 @@ class TokenBlocklist(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     jti = db.Column(db.String(36), nullable=False, index=True)
     created_at = db.Column(db.DateTime, nullable=False)
-    
-class LocationStorage(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    lat = db.Column(db.Float)
-    long = db.Column(db.Float)
-    location = db.Column(db.String(60))
-    country = db.Column(db.String(60))
-    country_code = db.Column(db.String(10))
-    
+
 
 
 
@@ -232,6 +228,15 @@ def register():
     try:
         db.session.add(new_user)
         db.session.commit()
+        postmark.emails.send_with_template(
+            TemplateId=34843478,
+            TemplateModel={
+                'product_name': 'flytics',
+                'action_url': activation_token},
+            From='flytics@elias.uno',
+            To=email,
+        )
+        # 34843719
         # tbd send activation mail
         return jsonify(code="0", message='User registered successfully'), 200
     except IntegrityError as e:
@@ -256,7 +261,7 @@ def login():
                 if (user.enabled == True):
                     if (user.deleted == False):
                         access_token = create_access_token(identity=user.id)
-                        return jsonify(code='0', access_token=access_token)
+                        return jsonify(code='0', access_token=access_token, user=user.id)
                     else:
                         return jsonify(code='40', message='Account deleted'), 200
                 else:
@@ -711,6 +716,8 @@ def upload_flight():
 
             utc_datetime = datetime.utcfromtimestamp(current_flight_data['timestamp'])
 
+            print(current_flight_data)
+
             if current_flight_data['code'] == 0:
                 new_flight = Flight(
                     user_id=user.id,
@@ -732,6 +739,7 @@ def upload_flight():
                     igc_file=filename,
                     igc_sum=md5_value,
                     kml_file=current_flight_data['kml_file'],
+                    geojson_file=current_flight_data['geojson_file'],
                     info=flight_information
                 )
 
@@ -793,7 +801,7 @@ def delete_flight(flight_id):
 #     user = User.query.get(current_user)
 
 #     if not user:
-#         return jsonify(code='20', message='User not found'), 404
+#         return jsonify(code='20', message='User not found'), 200
 
 #     # flight = Flight.query.filter_by(id=flight_id, user_id=user.id).first()
 #     flight = Flight.query.filter((Flight.id == flight_id) & ((Flight.user_id == user.id) | (Flight.public == True))).first()
@@ -856,8 +864,8 @@ def get_flights():
         distance_max = request.args.get('distance_max')
         duration_min = request.args.get('duration_min')
         duration_max = request.args.get('duration_max')
-        
-        
+        stats_enabled = 'stats' in request.args        
+
         # Base query for the user's flights
         base_query = Flight.query
 
@@ -950,6 +958,16 @@ def get_flights():
             'uploaded': str(flight.uploaded),
             'info': flight.info
         } for flight in filtered_flights]
+        
+        
+        if stats_enabled:
+            tot_duration = 0
+            for flight in flightList:
+                tot_duration += flight['duration']
+            return jsonify(code='0',
+                           message=f'Request successfull',
+                           duration=tot_duration,
+                           count=len(flightList)), 200
 
         return jsonify(code='0', message=f'{len(flightList)} flights found', count=len(flightList), flights=flightList), 200
 
@@ -974,9 +992,9 @@ def download_flight(flight_id):
         return jsonify(code=30, message=f'User not found')
     
     
-    flight = Flight.query.filter_by(id=flight_id, user_id=user.id).first()
-    if not flight:
-        return jsonify(code=40, message=f'Flight {flight_id} not found or does not belong to the user'), 200
+    flight = Flight.query.filter_by(id=flight_id).first()
+    if not flight or (flight.user_id != user.id and flight.public == False):
+        return jsonify(code=40, message=f'Flight {flight_id} not found or is private'), 200
     
     if filetype == "kml":
         requested_file_path = os.path.join(script_path + "/kml_files/")
@@ -984,6 +1002,10 @@ def download_flight(flight_id):
     elif filetype == "igc":
         requested_file_path = os.path.join(script_path + "/igc_files/")
         requested_filename = flight.igc_file
+    elif filetype == "geojson":
+        requested_file_path = os.path.join(script_path + "/geojson_files/")
+        requested_filename = flight.geojson_file
+        #tbd implement geojson
     else:
         return jsonify(code=50, message=f'Wrong type for download')
     
@@ -994,6 +1016,30 @@ def download_flight(flight_id):
     generic_filename = f'flight_{flight_id}.{filetype}'
     
     return send_from_directory(requested_file_path, requested_filename, as_attachment=True, download_name=generic_filename)
+
+
+# @app.route('/api/flights/<int:flight_id>/geojson', methods=['GET'])
+# @jwt_required(optional=True)
+# def get_kml(flight_id):
+
+#     current_user = get_jwt_identity()
+    
+#     token = request.args.get('token')
+    
+#     if token:
+#         return jsonify(code=10, message=f'Please select the filetype (kml or igc) as a parameter')
+        
+#     user = User.query.get(current_user)
+    
+#     if not user:
+#         return jsonify(code=30, message=f'User not found')
+    
+    
+#     flight = Flight.query.filter_by(id=flight_id, user_id=user.id).first()
+#     if not flight:
+#         return jsonify(code=40, message=f'Flight {flight_id} not found or does not belong to the user'), 200
+#     return send_from_directory(requested_file_path, requested_filename, as_attachment=True, download_name=generic_filename)
+
 
 
 if __name__ == '__main__':

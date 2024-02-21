@@ -2,5 +2,6 @@
 /venv/
 /profile_pictures/
 /kml_files/
+/geojson_files/
 /igc_files/
 .DS_STORE
