@@ -262,9 +262,15 @@ def parse_igc(filepath, pilot):
         data['start_lat'] = coordinates_list[0][1]
         data['start_long'] = coordinates_list[0][2]
 
-        # tbd end coordinates
-        
+        data['end_lat'] = coordinates_list[(len(coordinates_list)-1)][1]
+        data['end_long'] = coordinates_list[(len(coordinates_list)-1)][2]
         data['end_height'] = coordinates_list[len(coordinates_list)-1][3]
+
+
+        altitudes = [coord[3] for coord in coordinates_list]
+        data['max_height'] = max(altitudes)
+        data['min_height'] = min(altitudes)
+
 
         data['duration'] = coordinates_list[len(coordinates_list)-1][0] - coordinates_list[0][0]
 

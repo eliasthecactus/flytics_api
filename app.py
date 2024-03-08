@@ -72,8 +72,12 @@ class Flight(db.Model):
     distance = db.Column(db.Integer)
     start_lat = db.Column(db.Float)
     start_long = db.Column(db.Float)
+    end_lat = db.Column(db.Float)
+    end_long = db.Column(db.Float)
     start_height = db.Column(db.Integer)
     end_height = db.Column(db.Integer)
+    max_height = db.Column(db.Integer)
+    min_height = db.Column(db.Integer)
     duration = db.Column(db.Integer)
     timezone_raw_offset = db.Column(db.Integer)
     timezone_dst_offset = db.Column(db.Integer)
@@ -716,7 +720,8 @@ def upload_flight():
 
             utc_datetime = datetime.utcfromtimestamp(current_flight_data['timestamp'])
 
-            print(current_flight_data)
+            # print("=================================="+file.filename)
+            # print(current_flight_data)
 
             if current_flight_data['code'] == 0:
                 new_flight = Flight(
@@ -730,8 +735,12 @@ def upload_flight():
                     distance=current_flight_data['distance'],
                     start_lat=current_flight_data['start_lat'],
                     start_long=current_flight_data['start_long'],
+                    end_lat=current_flight_data['end_lat'],
+                    end_long=current_flight_data['end_long'],
                     start_height=current_flight_data['start_height'],
                     end_height=current_flight_data['end_height'],
+                    max_height=current_flight_data['max_height'],
+                    min_height=current_flight_data['min_height'],
                     duration=current_flight_data['duration'],
                     timezone_raw_offset=current_flight_data['timezone_raw_offset'],
                     timezone_dst_offset=current_flight_data['timezone_dst_offset'],
@@ -840,8 +849,8 @@ def delete_flight(flight_id):
 @app.route('/api/flights', methods=['GET'])
 @jwt_required()
 def get_flights():
+    # print("check")
     current_user = get_jwt_identity()
-    
     user = User.query.get(current_user)
     
     if not user:
@@ -864,12 +873,12 @@ def get_flights():
         distance_max = request.args.get('distance_max')
         duration_min = request.args.get('duration_min')
         duration_max = request.args.get('duration_max')
-        stats_enabled = 'stats' in request.args        
-
+        # stats_enabled = 'stats' in request.args        
+        
         # Base query for the user's flights
         base_query = Flight.query
 
-        
+
         if user_id_str:
             flight_user = User.query.get(user_id_str)
             if flight_user:
@@ -946,8 +955,12 @@ def get_flights():
             'distance': flight.distance,
             'start_lat': flight.start_lat,
             'start_long': flight.start_long,
+            'end_lat': flight.end_lat,
+            'end_long': flight.end_long,
             'start_height': flight.start_height,
             'end_height': flight.end_height,
+            'max_height': flight.max_height,
+            'min_height': flight.min_height,
             'duration': flight.duration,
             'timezone_raw_offset': flight.timezone_raw_offset,
             'timezone_dst_offset': flight.timezone_dst_offset,
@@ -960,14 +973,14 @@ def get_flights():
         } for flight in filtered_flights]
         
         
-        if stats_enabled:
-            tot_duration = 0
-            for flight in flightList:
-                tot_duration += flight['duration']
-            return jsonify(code='0',
-                           message=f'Request successfull',
-                           duration=tot_duration,
-                           count=len(flightList)), 200
+        # if stats_enabled:
+        #     tot_duration = 0
+        #     for flight in flightList:
+        #         tot_duration += flight['duration']
+        #     return jsonify(code='0',
+        #                    message=f'Request successfull',
+        #                    duration=tot_duration,
+        #                    count=len(flightList)), 200
 
         return jsonify(code='0', message=f'{len(flightList)} flights found', count=len(flightList), flights=flightList), 200
 
@@ -984,7 +997,6 @@ def download_flight(flight_id):
     
     if not filetype:
         return jsonify(code=10, message=f'Please select the filetype (kml or igc) as a parameter')
-        
 
     user = User.query.get(current_user)
     
@@ -995,6 +1007,7 @@ def download_flight(flight_id):
     flight = Flight.query.filter_by(id=flight_id).first()
     if not flight or (flight.user_id != user.id and flight.public == False):
         return jsonify(code=40, message=f'Flight {flight_id} not found or is private'), 200
+    
     
     if filetype == "kml":
         requested_file_path = os.path.join(script_path + "/kml_files/")
@@ -1014,7 +1027,7 @@ def download_flight(flight_id):
     
 
     generic_filename = f'flight_{flight_id}.{filetype}'
-    
+
     return send_from_directory(requested_file_path, requested_filename, as_attachment=True, download_name=generic_filename)
 
 
