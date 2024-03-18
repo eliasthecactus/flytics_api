@@ -15,6 +15,7 @@ from PIL import Image
 from kmlparser import *
 import hashlib
 from sqlalchemy import func, or_
+from sqlalchemy.orm import joinedload
 from postmarker.core import PostmarkClient
 
 
@@ -35,6 +36,8 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'default_secret_key')
 app.config['JWT_BLACKLIST_ENABLED'] = True
 app.config['JWT_BLACKLIST_TOKEN_CHECKS'] = ['access', 'refresh']
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(minutes=30)
+app.config["JWT_REFRESH_TOKEN_EXPIRES"] = timedelta(days=30)
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
@@ -88,7 +91,14 @@ class Flight(db.Model):
     geojson_file = db.Column(db.String(50))
     uploaded = db.Column(db.DateTime, default=datetime.utcnow)
     info = db.Column(db.String(255))
-    
+
+class Connections(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    connected_at = db.Column(db.DateTime, default=datetime.utcnow)
+    connection_from = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    connection_to = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    connection_approved = db.Column(db.Boolean, default=False)
+
 class TokenBlocklist(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     jti = db.Column(db.String(36), nullable=False, index=True)
@@ -189,7 +199,41 @@ def check_availability():
         return jsonify(code='10', message='Username already in use'), 200
     else:
         return jsonify(code='0', message='Username available'), 200
+    
 
+@app.route('/api/user/search', methods=['GET'])
+@jwt_required()
+def search_user():
+    name = request.args.get('name')
+
+    if not name:
+        return jsonify(code='20', message='Name is required'), 400
+
+
+    name_parts = name.split()
+
+    users = []
+
+    # Construct a query to search for users whose first name or last name matches any part of the provided name
+    query = User.query
+    for part in name_parts:
+        query = query.filter(or_(User.first_name.ilike(f"%{part}%"), User.last_name.ilike(f"%{part}%")))
+
+    users = query.all()
+
+    if users:
+        user_data = [{'id': user.id, 'first_name': user.first_name, 'last_name': user.last_name, 'picture': user.profile_picture} for user in users]
+        return jsonify(code='0', message='User(s) found', users=user_data), 200
+    else:
+        return jsonify(code='10', message='No user found'), 200
+
+
+@app.route("/api/user/refresh", methods=["POST"])
+@jwt_required(refresh=True)
+def refresh():
+    identity = get_jwt_identity()
+    access_token = create_access_token(identity=identity)
+    return jsonify(access_token=access_token)
 
 @app.route('/api/user/register', methods=['POST'])
 def register():
@@ -265,7 +309,8 @@ def login():
                 if (user.enabled == True):
                     if (user.deleted == False):
                         access_token = create_access_token(identity=user.id)
-                        return jsonify(code='0', access_token=access_token, user=user.id)
+                        refresh_token = create_refresh_token(identity=user.id)
+                        return jsonify(code='0', access_token=access_token, user=user.id, refresh_token=refresh_token)
                     else:
                         return jsonify(code='40', message='Account deleted'), 200
                 else:
@@ -856,7 +901,8 @@ def get_flights():
     if not user:
         return jsonify(code='20', message='User not found'), 200
     
-    try:
+    # try:
+    if 1==1:
         user_id_str = request.args.get('user')
         flight_id_str = request.args.get('flight_id')
         start_date_str = request.args.get('start_date')
@@ -875,8 +921,13 @@ def get_flights():
         duration_max = request.args.get('duration_max')
         # stats_enabled = 'stats' in request.args        
         
+        
         # Base query for the user's flights
-        base_query = Flight.query
+        base_query = db.session.query(Flight,User)
+
+        # for flight, user in db.session.query(Flight, User).join(User).all():
+        #     print(f"Flight ID: {flight.id}, User: {user.first_name} {user.last_name}")
+
 
 
         if user_id_str:
@@ -930,23 +981,36 @@ def get_flights():
             base_query = base_query.filter(Flight.duration >= int(duration_min))
         if duration_max:
             base_query = base_query.filter(Flight.duration <= int(duration_max))
-        
 
-        # Execute the final query
+
+        # filtered_flights = base_query.filter(User.id == Flight.user_id,).all()
+        base_query = base_query.join(User)
+
+        # Execute the query and retrieve the filtered flights with associated users
         filtered_flights = base_query.all()
-        
+
+
         if location_lat and location_long:
             if location_range_min or location_range_max:
-                filtered_flights = [
-            flight for flight in filtered_flights if (location_range_min is None or calculate_distance(float(location_lat), float(location_long), float(flight.start_lat), float(flight.start_long)) >= float(location_range_min)) and (location_range_max is None or calculate_distance(float(location_lat), float(location_long), float(flight.start_lat), float(flight.start_long)) <= float(location_range_max))
-        ]
-                    
-        
+                filtered_flights_temp = []
+                for flight, user in filtered_flights:
+                    delta_distance = calculate_distance(float(location_lat), float(location_long), float(flight.start_lat), float(flight.start_long))
+                    if (location_range_min is None or delta_distance >= float(location_range_min)) and (location_range_max is None or delta_distance <= float(location_range_max)):
+                        filtered_flights_temp.append((flight, user))
+                
+                filtered_flights = filtered_flights_temp
+
+
+                        
+
+
 
         # Prepare response data
         flightList = [{
             'id': flight.id,
             'user': flight.user_id,
+            'user_first_name': user.first_name,
+            'user_last_name': user.last_name,
             'start_time': str(flight.start_time),
             'timezone': flight.timezone,
             'country': flight.country,
@@ -970,9 +1034,9 @@ def get_flights():
             # 'kml_file': flight.kml_file,
             'uploaded': str(flight.uploaded),
             'info': flight.info
-        } for flight in filtered_flights]
+        } for flight,user in filtered_flights]
         
-        
+
         # if stats_enabled:
         #     tot_duration = 0
         #     for flight in flightList:
@@ -984,8 +1048,8 @@ def get_flights():
 
         return jsonify(code='0', message=f'{len(flightList)} flights found', count=len(flightList), flights=flightList), 200
 
-    except Exception as e:
-        return jsonify(code='50', message=f'Error retrieving flights: {str(e)}'), 500
+    # except Exception as e:
+    #     return jsonify(code='50', message=f'Error retrieving flights: {str(e)}'), 500
 
 
 @app.route('/api/flights/<int:flight_id>/download', methods=['GET'])
@@ -1058,4 +1122,4 @@ def download_flight(flight_id):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True)
+    app.run(debug=True, threaded=True)
