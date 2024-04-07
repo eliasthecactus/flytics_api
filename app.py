@@ -325,9 +325,10 @@ def login():
 
 
 @app.route("/api/user/logout", methods=["DELETE"])
-@jwt_required()
+@jwt_required(refresh=True)
 def logout():
     jti = get_jwt()["jti"]
+    print(jti)
     now = datetime.now(timezone.utc)
     db.session.add(TokenBlocklist(jti=jti, created_at=now))
     db.session.commit()
